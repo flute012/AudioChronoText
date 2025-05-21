@@ -12,31 +12,11 @@ from faster_whisper import WhisperModel
 from pydub import AudioSegment
 
 def clean_word(word):
-    """
-    移除所有非文字字符，僅保留純文字
-    
-    參數:
-    word (str): 需要清理的單字
-    
-    返回:
-    str: 清理後的單字
-    """
-    # 使用正則表達式移除所有非文字字符（包括標點符號、特殊字符等）
     cleaned = re.sub(r'[^\w\s]', '', word)
-    
-    # 移除多餘空格並返回
     return cleaned.strip()
 
 class AudioTranscriber:
     def __init__(self, model_name="large-v2", device="cpu"):
-        """
-        初始化轉錄器，使用 Whisper 模型。
-        
-        參數:
-        model_name (str): Whisper 模型名稱 ('tiny', 'base', 'small', 'medium', 'large-v2')
-        device (str): 強制設為 "cpu" 以避免 CUDA 問題
-        """
-        # 強制使用 CPU 以避免 CUDA 問題
         device = "cpu"
         print(f"載入 Faster Whisper {model_name} 模型於 {device}...")
         try:
@@ -47,50 +27,30 @@ class AudioTranscriber:
             raise
         
     def transcribe_audio(self, audio_path, reference_text=None):
-        """
-        轉錄 MP3 音檔，並可選擇使用參考文本進行修正。
-        返回轉錄文本和單字時間戳。
-        
-        參數:
-        audio_path (str): MP3 文件路徑
-        reference_text (str, 可選): 用於修正的參考文本
-        
-        返回:
-        dict: 包含轉錄和單字時間戳的字典
-        """
-        # 檢查文件是否存在
         if not os.path.isfile(audio_path):
             return {"error": f"找不到文件: {audio_path}"}
-        
-        # 使用 Faster Whisper 進行轉錄
         print("使用 Faster Whisper 進行轉錄...")
         segments, info = self.model.transcribe(audio_path, word_timestamps=True)
         
-        # 提取轉錄和單字時間戳
         transcription = ""
         word_timestamps = []
         
-        # 處理片段
         for segment in segments:
             transcription += segment.text + " "
             for word in segment.words:
-                # 清理單字中的所有非文字字符
                 original_word = word.word.strip()
                 cleaned_word = clean_word(original_word)
                 
-                # 只有當清理後的單字不為空時，才添加到時間戳列表
                 if cleaned_word:
                     word_timestamps.append({
                         "word": cleaned_word,
-                        "original_word": original_word,  # 保留原始單字以供參考
+                        "original_word": original_word, 
                         "start": round(word.start, 3),
                         "end": round(word.end, 3)
                     })
-        
-        # 清理轉錄文本
+
         transcription = transcription.strip()
         
-        # 如果提供了參考文本，修正轉錄
         if reference_text:
             print("使用參考文本修正轉錄...")
             corrected_transcription, corrected_timestamps = self.correct_transcription(
@@ -112,50 +72,38 @@ class AudioTranscriber:
         return result
     
     def correct_transcription(self, transcription, reference_text, word_timestamps):
-        """
-        使用參考文本修正轉錄並更新時間戳。
-        
-        參數:
-        transcription (str): 原始轉錄
-        reference_text (str): 用於修正的參考文本
-        word_timestamps (list): 單字時間戳列表
-        
-        返回:
-        tuple: (修正後的轉錄, 修正後的時間戳)
-        """
-        # 轉為小寫以便更好匹配
+
         trans_lower = transcription.lower()
         ref_lower = reference_text.lower()
-        
-        # 分割成單字
+
         trans_words_raw = trans_lower.split()
         ref_words_raw = ref_lower.split()
         
-        # 清理單字並移除空單字
+
         trans_words = [clean_word(w) for w in trans_words_raw]
         ref_words = [clean_word(w) for w in ref_words_raw]
         
-        # 移除清理後為空的單字
+
         trans_words = [w for w in trans_words if w]
         ref_words = [w for w in ref_words if w]
         
-        # 創建原始單字到清理後單字的映射（用於保持參考文本的原始格式）
+
         ref_original_map = {}
         for i, raw in enumerate(ref_words_raw):
             cleaned = clean_word(raw)
             if cleaned:
                 ref_original_map[i] = raw
         
-        # 使用序列匹配器找出差異
+
         matcher = difflib.SequenceMatcher(None, trans_words, ref_words)
         
-        # 建立修正後的時間戳
+
         corrected_timestamps = []
         current_trans_idx = 0
         
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == 'equal':
-                # 單字匹配 - 直接複製時間戳
+
                 for k in range(i2 - i1):
                     if current_trans_idx < len(word_timestamps):
                         timestamp = {
@@ -163,8 +111,7 @@ class AudioTranscriber:
                             "start": round(word_timestamps[current_trans_idx]["start"], 3),
                             "end": round(word_timestamps[current_trans_idx]["end"], 3)
                         }
-                        
-                        # 使用原始參考單字（如果有的話）
+
                         orig_idx = j1 + k
                         if orig_idx in ref_original_map:
                             timestamp["word"] = clean_word(ref_original_map[orig_idx])
@@ -173,12 +120,12 @@ class AudioTranscriber:
                         current_trans_idx += 1
             
             elif tag == 'replace':
-                # 單字被替換 - 分配時間戳
+
                 trans_segment_len = i2 - i1
                 ref_segment_len = j2 - j1
                 
                 if trans_segment_len > 0 and current_trans_idx < len(word_timestamps):
-                    # 獲取時間範圍
+
                     start_time = word_timestamps[current_trans_idx]["start"]
                     
                     if current_trans_idx + trans_segment_len - 1 < len(word_timestamps):
@@ -186,14 +133,14 @@ class AudioTranscriber:
                     else:
                         end_time = word_timestamps[-1]["end"]
                     
-                    # 分配時間戳
+
                     time_span = end_time - start_time
                     word_span = time_span / ref_segment_len if ref_segment_len > 0 else 0
                     
                     for k in range(ref_segment_len):
                         word_start = start_time + (k * word_span)
                         
-                        # 使用原始參考單字（如果有的話）
+
                         orig_idx = j1 + k
                         orig_word = ref_original_map.get(orig_idx, f"word_{j1+k}")
                         cleaned_word = clean_word(orig_word)
@@ -207,35 +154,32 @@ class AudioTranscriber:
                     current_trans_idx += trans_segment_len
             
             elif tag == 'delete':
-                # 轉錄中有但參考中沒有的單字 - 跳過
+
                 current_trans_idx += (i2 - i1)
             
             elif tag == 'insert':
-                # 參考中有但轉錄中沒有的單字 - 估計時間戳
+
                 if current_trans_idx > 0 or current_trans_idx < len(word_timestamps):
-                    # 獲取用於插值的參考點
+
                     if current_trans_idx == 0:
-                        # 在開頭插入
+
                         next_time = word_timestamps[0]["start"]
-                        prev_time = max(0, next_time - 0.5)  # 假設第一個單字前有 0.5 秒
+                        prev_time = max(0, next_time - 0.5) 
                     elif current_trans_idx >= len(word_timestamps):
-                        # 在結尾插入
+
                         prev_time = word_timestamps[-1]["end"]
-                        next_time = prev_time + 0.5  # 假設最後一個單字後有 0.5 秒
+                        next_time = prev_time + 0.5 
                     else:
-                        # 在中間插入
+
                         prev_time = word_timestamps[current_trans_idx-1]["end"]
                         next_time = word_timestamps[current_trans_idx]["start"]
                     
-                    # 計算可用的時間間隙
                     gap = next_time - prev_time
-                    word_gap = gap / (j2 - j1) if j2 > j1 else 0.2  # 默認每個單字 0.2 秒
+                    word_gap = gap / (j2 - j1) if j2 > j1 else 0.2  
                     
-                    # 創建時間戳
                     for k in range(j2 - j1):
                         word_start = prev_time + (k * word_gap)
                         
-                        # 使用原始參考單字（如果有的話）
                         orig_idx = j1 + k
                         orig_word = ref_original_map.get(orig_idx, f"word_{j1+k}")
                         cleaned_word = clean_word(orig_word)
@@ -246,16 +190,13 @@ class AudioTranscriber:
                             "end": round(word_start + word_gap, 3)
                         })
         
-        # 按開始時間排序
         corrected_timestamps.sort(key=lambda x: x["start"])
         
-        # 從參考重建修正後的轉錄
         corrected_transcription = " ".join([w for w in reference_text.split()])
         
         return corrected_transcription, corrected_timestamps
 
 def format_timestamp(seconds):
-    """將秒轉換為 HH:MM:SS.mmm 格式"""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     seconds = seconds % 60
@@ -317,7 +258,6 @@ class TranscriberApp:
         self.main_frame.columnconfigure(0, weight=1)
         self.main_frame.rowconfigure(2, weight=1)
         
-        # 參考文本區域
         self.ref_text = scrolledtext.ScrolledText(
             self.ref_frame, 
             wrap=tk.WORD, 
@@ -328,8 +268,7 @@ class TranscriberApp:
         self.ref_text.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
         self.ref_frame.columnconfigure(0, weight=1)
         self.ref_frame.rowconfigure(0, weight=1)
-        
-        # 瀏覽參考文本按鈕
+
         self.browse_ref_button = ttk.Button(
             self.ref_frame, 
             text="從文件導入...", 
@@ -337,7 +276,6 @@ class TranscriberApp:
         )
         self.browse_ref_button.grid(row=1, column=0, sticky="w", padx=5, pady=5)
         
-        # 清除參考文本按鈕
         self.clear_ref_button = ttk.Button(
             self.ref_frame, 
             text="清除參考文本", 
@@ -345,11 +283,9 @@ class TranscriberApp:
         )
         self.clear_ref_button.grid(row=1, column=1, sticky="e", padx=5, pady=5)
         
-        # 轉錄按鈕和進度條框架
         self.action_frame = ttk.Frame(self.main_frame, padding=5)
         self.action_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=5, padx=5)
         
-        # 轉錄按鈕
         self.transcribe_button = ttk.Button(
             self.action_frame, 
             text="開始轉錄", 
@@ -357,12 +293,10 @@ class TranscriberApp:
         )
         self.transcribe_button.grid(row=0, column=0, padx=5, pady=5)
         
-        # 狀態標籤
         self.status_var = tk.StringVar(value="準備就緒")
         self.status_label = ttk.Label(self.action_frame, textvariable=self.status_var)
         self.status_label.grid(row=0, column=1, padx=5, pady=5)
         
-        # 進度條
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(
             self.action_frame, 
@@ -373,13 +307,11 @@ class TranscriberApp:
         )
         self.progress_bar.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
         self.action_frame.columnconfigure(2, weight=1)
-        
-        # 結果框架
+
         self.result_frame = ttk.LabelFrame(self.main_frame, text="轉錄結果", padding=10)
         self.result_frame.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=5, padx=5)
         self.main_frame.rowconfigure(4, weight=2)
         
-        # 結果文本區域 - 擴大顯示區域
         self.result_text = scrolledtext.ScrolledText(
             self.result_frame, 
             wrap=tk.WORD, 
@@ -391,7 +323,6 @@ class TranscriberApp:
         self.result_frame.columnconfigure(0, weight=1)
         self.result_frame.rowconfigure(0, weight=1)
         
-        # 說明框架 - 減小高度
         self.help_frame = ttk.LabelFrame(self.main_frame, text="使用說明", padding=5)
         self.help_frame.grid(row=5, column=0, columnspan=3, sticky="ew", pady=5, padx=5)
         
@@ -403,14 +334,10 @@ class TranscriberApp:
         
         self.help_label = ttk.Label(self.help_frame, text=help_text, justify=tk.LEFT)
         self.help_label.grid(row=0, column=0, sticky="w", padx=5, pady=5)
-        
-        # 移除版權信息區塊
-        
-        # 初始化轉錄器
+
         self.transcriber = None
         
     def browse_audio_file(self):
-        """瀏覽並選擇音頻文件"""
         filepath = filedialog.askopenfilename(
             title="選擇音頻文件",
             filetypes=[("MP3 文件", "*.mp3")]
@@ -419,7 +346,6 @@ class TranscriberApp:
             self.audio_path_var.set(filepath)
             
     def browse_ref_file(self):
-        """瀏覽並選擇參考文本文件"""
         filepath = filedialog.askopenfilename(
             title="選擇參考文本文件",
             filetypes=[("文本文件", "*.txt")]
@@ -449,29 +375,25 @@ class TranscriberApp:
             messagebox.showerror("錯誤", f"找不到音頻文件: {audio_path}")
             return
             
-        # 獲取參考文本
         reference_text = self.ref_text.get(1.0, tk.END).strip()
         if not reference_text:
             reference_text = None
         else:
             print(f"使用參考文本，長度: {len(reference_text)} 字符")
-            
-        # 禁用按鈕避免重複點擊
+
         self.transcribe_button.configure(state="disabled")
         self.browse_button.configure(state="disabled")
         self.browse_ref_button.configure(state="disabled")
-        
-        # 啟動進度條
+
         self.progress_bar.start(10)
         self.status_var.set("正在準備轉錄...")
-        
-        # 使用新線程執行轉錄以避免凍結介面
+
         threading.Thread(target=self.run_transcription, args=(audio_path, reference_text)).start()
         
     def run_transcription(self, audio_path, reference_text):
-        """在單獨的線程中執行轉錄過程"""
+
         try:
-            # 更新界面
+
             self.root.after(0, lambda: self.status_var.set("正在載入模型..."))
             
             # 創建轉錄器
